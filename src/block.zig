@@ -150,21 +150,16 @@ pub fn Block(
         /// the first arg. The first arg is a pointer so from an ABI perspective
         /// this is always the same and can be safely casted.
         fn FnType(comptime ContextArg: type) type {
-            var params: [Args.len + 1]std.builtin.Type.Fn.Param = undefined;
-            params[0] = .{ .is_generic = false, .is_noalias = false, .type = *const ContextArg };
-            for (Args, 1..) |Arg, i| {
-                params[i] = .{ .is_generic = false, .is_noalias = false, .type = Arg };
+            const Fn = std.builtin.Type.Fn;
+            var types = [_]type{*const ContextArg};
+            var attrs = [_]Fn.Param.Attributes{.{}};
+
+            for (Args) |Arg| {
+                types = types ++ [_]type{Arg};
+                params = params ++ [_]Fn.Param.Attributes{.{}};
             }
 
-            return @Type(.{
-                .@"fn" = .{
-                    .calling_convention = .c,
-                    .is_generic = false,
-                    .is_var_args = false,
-                    .return_type = Return,
-                    .params = &params,
-                },
-            });
+            return @Fn(types, &attrs, Return, .{ .@"callconv" = .c });
         }
     };
 }
@@ -172,68 +167,32 @@ pub fn Block(
 /// This is the type of a block structure that is passed as the first
 /// argument to any block invocation. See Block.
 fn BlockContext(comptime Captures: type, comptime InvokeFn: type) type {
+    const Attributes = std.builtin.Type.StructField.Attributes;
     const captures_info = @typeInfo(Captures).@"struct";
-    var fields: [captures_info.fields.len + 5]std.builtin.Type.StructField = undefined;
-    fields[0] = .{
-        .name = "isa",
-        .type = ?*anyopaque,
-        .default_value_ptr = null,
-        .is_comptime = false,
-        .alignment = @alignOf(*anyopaque),
-    };
-    fields[1] = .{
-        .name = "flags",
-        .type = BlockFlags,
-        .default_value_ptr = null,
-        .is_comptime = false,
-        .alignment = @alignOf(c_int),
-    };
-    fields[2] = .{
-        .name = "reserved",
-        .type = c_int,
-        .default_value_ptr = null,
-        .is_comptime = false,
-        .alignment = @alignOf(c_int),
-    };
-    fields[3] = .{
-        .name = "invoke",
-        .type = *const InvokeFn,
-        .default_value_ptr = null,
-        .is_comptime = false,
-        .alignment = @typeInfo(*const InvokeFn).pointer.alignment,
-    };
-    fields[4] = .{
-        .name = "descriptor",
-        .type = *const Descriptor,
-        .default_value_ptr = null,
-        .is_comptime = false,
-        .alignment = @alignOf(*Descriptor),
+    const field_len = captures_info.fields.len;
+
+    var names: [_][]const u8{ "isa", "flags", "reserved", "invoke", "descriptor" };
+    var types: [_]type{ ?*anyopaque, BlockFlags, c_int, *const InvokeFn, *const Descriptor };
+    var attrs: [_]Attributes{
+        .{ .align = @alignOf(*anyopaque) },
+        .{ .align = @alignOf(c_int) },
+        .{ .align = @alignOf(c_int) },
+        .{ .align = @typeInfo(*const InvokeFn).pointer.alignment },
+        .{ .align = @alignOf(*Descriptor) },
     };
 
-    for (captures_info.fields, 5..) |capture, i| {
+    for (captures_info.fields) |capture| {
         switch (capture.type) {
             comptime_int => @compileError("capture should not be a comptime_int, try using @as"),
             comptime_float => @compileError("capture should not be a comptime_float, try using @as"),
             else => {},
         }
-
-        fields[i] = .{
-            .name = capture.name,
-            .type = capture.type,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = capture.alignment,
-        };
+        names = names ++ [_][]const u8{capture.name};
+        types = types ++ [_]type{capture.type};
+        attrs = attrs ++ [_]Attributes{.{ .align = capture.alignment }};
     }
 
-    return @Type(.{
-        .@"struct" = .{
-            .layout = .@"extern",
-            .fields = &fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
+    return @Struct(.@"extern", null, names, types, attrs);
 }
 
 // Pointer to opaque instead of anyopaque: https://github.com/ziglang/zig/issues/18461

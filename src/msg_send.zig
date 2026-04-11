@@ -190,34 +190,20 @@ fn MsgSendFn(
 
     // Build up our argument types.
     const Fn = std.builtin.Type.Fn;
-    const params: []Fn.Param = params: {
-        var acc: [argsInfo.fields.len + 2]Fn.Param = undefined;
+    // First argument is always the target and selector.
+    var types = [_]type{ Target, c.SEL };
 
-        // First argument is always the target and selector.
-        acc[0] = .{ .type = Target, .is_generic = false, .is_noalias = false };
-        acc[1] = .{ .type = c.SEL, .is_generic = false, .is_noalias = false };
+    // Remaining arguments depend on the args given, in the order given
+    for (argsInfo.fields) |field| {
+        types = types ++ [_]type{field.type};
+    }
 
-        // Remaining arguments depend on the args given, in the order given
-        for (argsInfo.fields, 0..) |field, i| {
-            acc[i + 2] = .{
-                .type = field.type,
-                .is_generic = false,
-                .is_noalias = false,
-            };
-        }
+    var attrs: [types.len]Fn.Param.Attributes = undefined;
+    for (&attrs) |*attr| {
+        attr.* = .{};
+    }
 
-        break :params &acc;
-    };
-
-    return @Type(.{
-        .@"fn" = .{
-            .calling_convention = .c,
-            .is_generic = false,
-            .is_var_args = false,
-            .return_type = Return,
-            .params = params,
-        },
-    });
+    return @Fn(types, &attrs, Return, .{ .@"callconv" = .c });
 }
 
 test {
